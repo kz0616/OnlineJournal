@@ -1,16 +1,4 @@
--- ======================================-- 5. Таблица для индивидуальных правил доступа пользователей (ОБЪЕДИНЕННАЯ)
--- Позволяет назначать или запрещать разрешения напрямую пользователю, в обход его роли.
--- Правило 'deny' имеет наивысший приоритет.
-CREATE TABLE user_specific_rules (
-    user_id INT NOT NULL,
-    permission_id INT NOT NULL,
-    access_type ENUM('allow', 'deny') NOT NULL,
-    PRIMARY KEY (user_id, permission_id),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
-);
-
--- 6. Таблица предметов=======
+-- 6. Таблица предметов
 -- СОЗДАНИЕ СТРУКТУРЫ ТАБЛИЦ (DDL)
 -- =================================================================
 
@@ -42,6 +30,9 @@ CREATE TABLE users (
     FOREIGN KEY (role_id) REFERENCES roles(id)
 );
 
+-- Индексы по FK для производительности
+CREATE INDEX idx_users_role_id ON users(role_id);
+
 -- 4. Таблица для связи ролей и разрешений
 CREATE TABLE role_permissions (
     role_id INT NOT NULL,
@@ -50,25 +41,22 @@ CREATE TABLE role_permissions (
     FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
     FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
 );
+CREATE INDEX idx_role_permissions_role_id ON role_permissions(role_id);
+CREATE INDEX idx_role_permissions_permission_id ON role_permissions(permission_id);
 
--- 5. Таблица для индивидуальных разрешений пользователей
-CREATE TABLE user_permissions (
+-- 5. Таблица для индивидуальных правил доступа пользователей (единая)
+-- Позволяет назначать или запрещать разрешения напрямую пользователю, в обход роли.
+-- Правило 'deny' имеет наивысший приоритет.
+CREATE TABLE user_specific_rules (
     user_id INT NOT NULL,
     permission_id INT NOT NULL,
+    access_type ENUM('allow', 'deny') NOT NULL,
     PRIMARY KEY (user_id, permission_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
 );
-
--- 6. Таблица для индивидуальных ЗАПРЕТОВ разрешений пользователей (НОВАЯ)
--- Имеет приоритет над разрешениями роли.
-CREATE TABLE user_permission_denials (
-    user_id INT NOT NULL,
-    permission_id INT NOT NULL,
-    PRIMARY KEY (user_id, permission_id),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
-);
+CREATE INDEX idx_user_specific_rules_user_id ON user_specific_rules(user_id);
+CREATE INDEX idx_user_specific_rules_permission_id ON user_specific_rules(permission_id);
 
 -- 7. Таблица предметов
 CREATE TABLE subjects (
@@ -95,6 +83,7 @@ CREATE TABLE academic_terms (
     FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE,
     UNIQUE(academic_year_id, name)
 );
+CREATE INDEX idx_academic_terms_year ON academic_terms(academic_year_id);
 
 -- 10. Таблица классов
 CREATE TABLE classes (
@@ -106,6 +95,8 @@ CREATE TABLE classes (
     FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE SET NULL,
     UNIQUE(name, academic_year_id)
 );
+CREATE INDEX idx_classes_year ON classes(academic_year_id);
+CREATE INDEX idx_classes_teacher ON classes(teacher_id);
 
 -- 11. Таблица зачислений
 CREATE TABLE class_enrollments (
@@ -118,6 +109,9 @@ CREATE TABLE class_enrollments (
     FOREIGN KEY (academic_year_id) REFERENCES academic_years(id) ON DELETE CASCADE,
     UNIQUE(student_id, academic_year_id)
 );
+CREATE INDEX idx_enrollments_student ON class_enrollments(student_id);
+CREATE INDEX idx_enrollments_class ON class_enrollments(class_id);
+CREATE INDEX idx_enrollments_year ON class_enrollments(academic_year_id);
 
 -- 12. Таблица расписания
 CREATE TABLE schedule (
@@ -132,10 +126,14 @@ CREATE TABLE schedule (
     FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE CASCADE,
     FOREIGN KEY (subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
     FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
-    UNIQUE(class_id, day_of_week, start_time),
-    UNIQUE(teacher_id, day_of_week, start_time),
-    UNIQUE(room_number, day_of_week, start_time)
+    CHECK (start_time < end_time),
+    UNIQUE(class_id, day_of_week, start_time, end_time),
+    UNIQUE(teacher_id, day_of_week, start_time, end_time),
+    UNIQUE(room_number, day_of_week, start_time, end_time)
 );
+CREATE INDEX idx_schedule_class ON schedule(class_id);
+CREATE INDEX idx_schedule_subject ON schedule(subject_id);
+CREATE INDEX idx_schedule_teacher ON schedule(teacher_id);
 
 -- 13. Таблица уроков
 CREATE TABLE lessons (
@@ -147,6 +145,8 @@ CREATE TABLE lessons (
     FOREIGN KEY (schedule_id) REFERENCES schedule(id) ON DELETE CASCADE,
     UNIQUE(schedule_id, lesson_date)
 );
+CREATE INDEX idx_lessons_schedule ON lessons(schedule_id);
+CREATE INDEX idx_lessons_date ON lessons(lesson_date);
 
 -- 14. Таблица оценок
 CREATE TABLE grades (
@@ -164,6 +164,10 @@ CREATE TABLE grades (
     FOREIGN KEY (teacher_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (academic_term_id) REFERENCES academic_terms(id) ON DELETE CASCADE
 );
+CREATE INDEX idx_grades_student ON grades(student_id);
+CREATE INDEX idx_grades_lesson ON grades(lesson_id);
+CREATE INDEX idx_grades_teacher ON grades(teacher_id);
+CREATE INDEX idx_grades_term ON grades(academic_term_id);
 
 -- 15. Таблица посещаемости
 CREATE TABLE attendance (
@@ -176,6 +180,8 @@ CREATE TABLE attendance (
     FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE,
     UNIQUE(student_id, lesson_id)
 );
+CREATE INDEX idx_attendance_student ON attendance(student_id);
+CREATE INDEX idx_attendance_lesson ON attendance(lesson_id);
 
 -- 16. Таблица домашних заданий
 CREATE TABLE homework (
@@ -187,6 +193,7 @@ CREATE TABLE homework (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (lesson_id) REFERENCES lessons(id) ON DELETE CASCADE
 );
+CREATE INDEX idx_homework_lesson ON homework(lesson_id);
 
 -- 17. Таблица для исходящих СМС-рассылок
 CREATE TABLE sms_dispatches (
@@ -213,6 +220,8 @@ CREATE TABLE daily_absences (
     FOREIGN KEY (approved_by_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE(student_id, absence_date)
 );
+CREATE INDEX idx_absences_student ON daily_absences(student_id);
+CREATE INDEX idx_absences_approved_by ON daily_absences(approved_by_id);
 
 -- 19. Таблица итоговых оценок
 CREATE TABLE final_grades (
@@ -230,6 +239,9 @@ CREATE TABLE final_grades (
     FOREIGN KEY (assigned_by_teacher_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE(student_id, subject_id, academic_term_id)
 );
+CREATE INDEX idx_final_grades_student ON final_grades(student_id);
+CREATE INDEX idx_final_grades_subject ON final_grades(subject_id);
+CREATE INDEX idx_final_grades_term ON final_grades(academic_term_id);
 
 
 -- =================================================================
